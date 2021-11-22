@@ -6,8 +6,7 @@ import data_parser
 import os
 import ftplib
 
-import ftpcreds
-#from creds import host, ftp_user, ftp_password, ftp_dir
+from creds import host, ftp_user, ftp_password, ftp_dir
 
 import currencies
 # For backward compatability - needs to be deprecated later
