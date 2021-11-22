@@ -6,8 +6,6 @@ import data_parser
 import os
 import ftplib
 
-from creds import host, ftp_user, ftp_password, ftp_dir
-
 import currencies
 # For backward compatability - needs to be deprecated later
 # after merging parts tables
@@ -17,6 +15,12 @@ assets_types = ['Stock', 'Bond', 'Etf', 'Other', 'Currency']
 logger = logging.getLogger("ExBuild")
 logger.setLevel(logging.INFO)
 
+#FTP creds
+with open(file='creds.txt') as creds_file:
+     host = creds_file.readline().rstrip('\n')
+     ftp_user = creds_file.readline().rstrip('\n')
+     ftp_password = creds_file.readline().rstrip('\n')
+     ftp_dir = creds_file.readline().rstrip('\n')
 
 def get_color(num):
     if num > 0:
@@ -652,8 +656,8 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                      'которая рассчитывает эффективность инвестирования '
                      'с учётом всех пополнений и выводов средств', 3],
 
-            ['', ' Разработано @softandiron и контрибьюторами. Версия v2.x, 2021 год.', 0],
-            ['', ' GitHub: https://github.com/softandiron/tinkproject', 0]
+#            ['', ' Разработано @softandiron и контрибьюторами. Версия v2.x, 2021 год.', 0],
+#            ['', ' GitHub: https://github.com/softandiron/tinkproject', 0]
         ]
 
         for line in lines:
@@ -675,7 +679,7 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
     logger.info('Excel file composed! With name: '+excel_file_name)
     workbook.close()
 
-#FTP    
+#FTP send and delete    
     filename = excel_file_name
     con = ftplib.FTP(host, ftp_user, ftp_password)
     con.cwd(ftp_dir) #

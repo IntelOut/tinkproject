@@ -24,14 +24,6 @@ ruble = ExchangeRate(code='RUB', value=Decimal(1), rate=Decimal(1), name='Руб
                      id='KOSTYL', num='KOSTYL', par=Decimal(1))
 delay_time = 0.1
 
-def creds():
-    with open(file='creds.txt') as creds_file:
-        host = creds_file.readline().rstrip('\n')
-        ftp_user = creds_file.readline().rstrip('\n')
-        ftp_password = creds_file.readline().rstrip('\n')
-        ftp_dir = creds_file.readline().rstrip('\n')
-    return {host, ftp_user, ftp_password, ftp_dir}
-
 def get_exchange_rate_db(date=datetime.now(), currency="USD"):
     rate = database.get_exchange_rate(date, currency)
     if rate:
