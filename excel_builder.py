@@ -679,18 +679,19 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
     logger.info('Excel file composed! With name: '+excel_file_name)
     workbook.close()
 
-#FTP send and delete    
-    filename = excel_file_name
-    con = ftplib.FTP(host, ftp_user, ftp_password)
-    con.cwd(ftp_dir) #
-    f = open(filename, "rb")
-    # 
-    send = con.storbinary("STOR "+ filename, f)
-    # 
-    logger.info('Excel file sent to FTP: '+excel_file_name)
-    con.close
-    if os.path.isfile(excel_file_name):
-           os.remove(excel_file_name)
-           print("Success: Deleted "+excel_file_name)
+#FTP send and delete + check for creds.txt   
+    if os.path.isfile('creds.txt'):
+        filename = excel_file_name
+        con = ftplib.FTP(host, ftp_user, ftp_password)
+        con.cwd(ftp_dir) #
+        f = open(filename, "rb")
+        send = con.storbinary("STOR "+ filename, f)
+        logger.info('Excel file sent to FTP: '+excel_file_name)
+        con.close
+        if os.path.isfile(excel_file_name):
+               os.remove(excel_file_name)
+               print("Success: Deleted "+excel_file_name)
+        else:
+               print(excel_file_name+" - File doesn't exists!")
     else:
-           print(excel_file_name+" - File doesn't exists!")
+        print("No creds.txt file exist, skipping FTP send.")
