@@ -3,6 +3,10 @@
 import logging
 import xlsxwriter
 import data_parser
+import os
+import ftplib
+
+from creds import host, ftp_user, ftp_password, ftp_dir
 
 import currencies
 # For backward compatability - needs to be deprecated later
@@ -670,3 +674,19 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
     # finish Excel
     logger.info('Excel file composed! With name: '+excel_file_name)
     workbook.close()
+
+#FTP    
+    filename = excel_file_name
+    con = ftplib.FTP(host, ftp_user, ftp_password)
+    con.cwd(ftp_dir) #
+    f = open(filename, "rb")
+    # 
+    send = con.storbinary("STOR "+ filename, f)
+    # 
+    logger.info('Excel file sent to FTP: '+excel_file_name)
+    con.close
+    if os.path.isfile(excel_file_name):
+           os.remove(excel_file_name)
+           print("Success: Deleted "+excel_file_name)
+    else:
+           print(excel_file_name+" - File doesn't exists!")
