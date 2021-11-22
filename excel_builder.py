@@ -23,8 +23,8 @@ if os.path.isfile('creds.txt'):
          ftp_password = creds_file.readline().rstrip('\n')
          ftp_dir = creds_file.readline().rstrip('\n')
 else:
-    print ("No creds.txt exists, FTP send disabled."
-
+    print ("No creds.txt exists, FTP send disabled.")
+    
 def get_color(num):
     if num > 0:
         return 'green'
