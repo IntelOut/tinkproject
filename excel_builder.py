@@ -16,11 +16,14 @@ logger = logging.getLogger("ExBuild")
 logger.setLevel(logging.INFO)
 
 #FTP creds
-with open(file='creds.txt') as creds_file:
-     host = creds_file.readline().rstrip('\n')
-     ftp_user = creds_file.readline().rstrip('\n')
-     ftp_password = creds_file.readline().rstrip('\n')
-     ftp_dir = creds_file.readline().rstrip('\n')
+if os.path.isfile('creds.txt'):
+    with open(file='creds.txt') as creds_file:
+         host = creds_file.readline().rstrip('\n')
+         ftp_user = creds_file.readline().rstrip('\n')
+         ftp_password = creds_file.readline().rstrip('\n')
+         ftp_dir = creds_file.readline().rstrip('\n')
+else:
+    print ("No creds.txt exists, FTP send disabled."
 
 def get_color(num):
     if num > 0:
