@@ -18,6 +18,16 @@ assets_types = ['share', 'bond', 'etf', 'futures', 'currency']
 logger = logging.getLogger("ExBuild")
 logger.setLevel(logging.INFO)
 
+#FTP creds to variables
+if os.path.isfile('creds.txt'):
+    with open(file='creds.txt') as creds_file:
+         host = creds_file.readline().rstrip('\n')
+         ftp_user = creds_file.readline().rstrip('\n')
+         ftp_password = creds_file.readline().rstrip('\n')
+         ftp_dir = creds_file.readline().rstrip('\n')
+else:
+    print ("No creds.txt exists, FTP send will be disabled.")
+
 
 def get_color(num):
     if num > 0:
