@@ -7,24 +7,18 @@ import os
 import ftplib
 
 import currencies
-# For backward compatability - needs to be deprecated later
+
+from configuration import Config
+
+# For backward compatibility - needs to be deprecated later
 # after merging parts tables
 supported_currencies = currencies.supported_currencies
-assets_types = ['Stock', 'Bond', 'Etf', 'Other', 'Currency']
+assets_types = ['share', 'bond', 'etf', 'futures', 'currency']
 
 logger = logging.getLogger("ExBuild")
 logger.setLevel(logging.INFO)
 
-#FTP creds
-if os.path.isfile('creds.txt'):
-    with open(file='creds.txt') as creds_file:
-         host = creds_file.readline().rstrip('\n')
-         ftp_user = creds_file.readline().rstrip('\n')
-         ftp_password = creds_file.readline().rstrip('\n')
-         ftp_dir = creds_file.readline().rstrip('\n')
-else:
-    print ("No creds.txt exists, FTP send disabled.")
-    
+
 def get_color(num):
     if num > 0:
         return 'green'
@@ -38,22 +32,27 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                      investing_period_str, cash_rub, payin_payout, xirr_value, tax_rate):
 
     logger.info('creating excel file..')
-    excel_file_name = 'tinkoffReport_' + data_parser.account_data['now_date'].strftime('%Y.%b.%d') + '_'\
-                      + account.broker_account_id + '.xlsx'
+    excel_file_name = config.get_account_filename(account.broker_account_id)
+    excel_file_name = str(excel_file_name) + '.xlsx'
     workbook = xlsxwriter.Workbook(excel_file_name)
     workbook.set_size(1440, 1024)  # set default window size
     worksheet_port = workbook.add_worksheet("Portfolio")
-    worksheet_ops = workbook.add_worksheet("Operations")
+    worksheet_oplist = workbook.add_worksheet("Operations list")
     worksheet_divs = workbook.add_worksheet("Coupons and Dividends")
+    worksheet_deduct = workbook.add_worksheet("IIS Deduction")
     worksheet_parts = workbook.add_worksheet("Parts")
 
     # styles
     cell_format = {}
     cell_format['center'] = workbook.add_format({'align': 'center'})
     cell_format['right'] = workbook.add_format({'align': 'right'})
+    cell_format['right_number'] = workbook.add_format({'align': 'right',
+                                                       'num_format': '## ### ##0.00'})
     cell_format['left'] = workbook.add_format({'align': 'left'})
     cell_format['bold_center'] = workbook.add_format({'align': 'center', 'bold': True})
     cell_format['bold_right'] = workbook.add_format({'align': 'right', 'bold': True})
+    cell_format['date_time'] = workbook.add_format({'align': 'center',
+                                                    'num_format': 'YYYY-MM-DD hh:mm:ss;@'})
     for currency, data in currencies.currencies_data.items():
         cell_format[currency] = workbook.add_format({'num_format': data['num_format'],
                                                      'align': 'right'})
@@ -70,7 +69,26 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
     merge_format['left_small'] = workbook.add_format({'align': 'left', 'valign': 'vcenter', 'bold': False, 'font_size': '9'})
 
     worksheet_port.set_column('A:A', 16)
-    worksheet_port.write(0, 0, data_parser.account_data['now_date'].strftime('%Y %b %d  %H:%M'), cell_format['bold_center'])
+    worksheet_port.write(0, 0, config.now_date.strftime('%Y %b %d  %H:%M'), cell_format['bold_center'])
+
+    def print_headers(worksheet, start_col, start_row, headers=[], set_filter=True):
+        """Вывод строки заголовков и установка нужной ширины столбца
+
+        Args:
+            worksheet: лист, на котором надо сделать
+            start_col (int): начальная колонка
+            start_row (int): начальный ряд
+            headers (list, optional): список рядов в формате [["название столбца", ширина], ...].
+                                      Defaults to [].
+            set_filter (bool, optional): Формировать ли фильрацию списка. Defaults to True.
+        """
+        n = 0
+        for header in headers:
+            worksheet.write(start_row, start_col + n, header[0], cell_format['bold_center'])
+            worksheet.set_column(start_col+n, start_col+n, header[1])
+            n += 1
+        if set_filter:
+            worksheet.autofilter(start_row, start_col, start_row, start_col+n-1)
 
     def print_portfolio(s_row, s_col):
         logger.info('building portfolio table..')
@@ -123,8 +141,14 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                 def print_position_data(row, col):
                     worksheet_port.write(row, col, this_pos.name, cell_format['left'])
                     worksheet_port.write(row, col + 1, this_pos.ticker, cell_format['left'])
-                    worksheet_port.write(row, col + 2, this_pos.balance, cell_format['left'])
-                    worksheet_port.write(row, col + 3, this_pos.currency, cell_format['left'])
+                    if this_pos.position_type != "currency":
+                        worksheet_port.write(row, col + 2, this_pos.balance, cell_format['right'])
+                        worksheet_port.write(row, col + 3, this_pos.currency, cell_format['left'])
+                    else:
+                        worksheet_port.write(row, col + 2, this_pos.balance, cell_format['right_number'])
+                        # для валютных позиций вывести их 3-буквенное обозначение
+                        code = currencies.currency_code_by_figi(this_pos.figi)
+                        worksheet_port.write(row, col + 3, code, cell_format['left'])
 
                     if this_pos.currency in supported_currencies:
                         worksheet_port.write(row, col + 4, this_pos.ave_price, cell_format[this_pos.currency])
@@ -161,10 +185,10 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                     row = print_position_data(row, col)
 
                 if pos_type == "Other":
-                    if this_pos.position_type != "Stock"\
-                            and this_pos.position_type != "Bond"\
-                            and this_pos.position_type != "Etf"\
-                            and this_pos.position_type != "Currency":
+                    if this_pos.position_type != "share"\
+                            and this_pos.position_type != "bond"\
+                            and this_pos.position_type != "etf"\
+                            and this_pos.position_type != "currency":
                         row = print_position_data(row, col)
 
             return row
@@ -207,135 +231,69 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
         build_header()
         build_cb_rate()
         build_market_rates()
-        s_row = print_content("Stock")
-        s_row = print_content("Bond")
-        s_row = print_content("Etf")
+        s_row = print_content("share")
+        s_row = print_content("bond")
+        s_row = print_content("etf")
         s_row = print_content("Other")
-        last_row = print_content("Currency")
+        last_row = print_content("currency")
         worksheet_port.autofilter(4, s_col, last_row, s_col+16)
         print_totals(last_row, s_col)
 
         return last_row
 
-    def print_operations(s_row, s_col):
+    def print_operations():
         logger.info('building operations table..')
         start_col = 1
-        def print_operations_by_type(ops_type, start_row, start_col):
-            # set column width
-            worksheet_ops.set_column(start_col, start_col, 18, cell_format['right'])
-            worksheet_ops.set_column(start_col + 1, start_col + 1, 16, cell_format['right'])
-            worksheet_ops.set_column(start_col + 2, start_col + 2, 4, cell_format['right'])
+        start_row = 2
 
-            # header
-            name = ops_type + ' operations'
-            worksheet_ops.write(start_row, start_col, name, cell_format['bold_center'])
-            worksheet_ops.write(start_row, start_col + 1, 'value', cell_format['bold_center'])
-            # body
+        # Выводим строку расчета итогов
+        n_ops = len(my_operations)
+        end_line = start_row+n_ops+3
+        worksheet_oplist.write(start_row, start_col+3, "ИТОГО:", cell_format['bold_right'])
+        worksheet_oplist.write_formula(start_row, start_col+4,
+                                       f"=SUBTOTAL(9, F6:F{end_line})",
+                                       cell_format['right_number'])
+        worksheet_oplist.write_formula(start_row, start_col+6,
+                                       f"=SUBTOTAL(9, H6:H{end_line})",
+                                       cell_format["RUB"])
+
+        start_row += 2
+        # Выводим заголовки
+        headers = [
+            # ["Название столбца", ширина],
+            ["Дата", 18],
+            ["Тип операции", 35],
+            ["Тикер", 15],
+            ["figi", 18],
+            ["Сумма", 15],
+            ["Валюта", 8],
+            ["Сумма в руб", 15],
+            ["Статус", 8],
+            ["Категория", 15],
+        ]
+        print_headers(worksheet_oplist, start_col, start_row, headers)
+
+        # заполняем список операций
+        for operation in my_operations:
             start_row += 1
-            worksheet_ops.write(start_row, start_col, 'start', cell_format['right'])
-            for operation in my_operations:
-                if operation.op_type == ops_type:
-                    # operation's date
-                    worksheet_ops.write(start_row, start_col, operation.op_date.strftime('%Y %b %d  %H:%M'), cell_format['left'])
-                    # operation's value (payment in the operation's currency)
-                    if operation.op_currency in supported_currencies:
-                        worksheet_ops.write(start_row, start_col + 1, operation.op_payment, cell_format[operation.op_currency])
-                    else:
-                        worksheet_ops.write(start_row, start_col + 1, 'unknown currency', cell_format['right'])
-                    start_row += 1
-
-            finish_row = start_row + 1
-            return finish_row
-
-        def print_operations_with_ticker(ops_type, start_row, start_col):
-            # set column width
-            worksheet_ops.set_column(start_col, start_col, 18, cell_format['right'])
-            worksheet_ops.set_column(start_col + 1, start_col + 1, 16, cell_format['right'])
-            worksheet_ops.set_column(start_col + 2, start_col + 2, 16, cell_format['right'])
-            worksheet_ops.set_column(start_col + 3, start_col + 3, 4, cell_format['right'])
-
-            # header
-            name = ops_type + ' operations'
-            worksheet_ops.write(start_row, start_col, name, cell_format['bold_center'])
-            worksheet_ops.write(start_row, start_col + 1, 'ticker', cell_format['bold_center'])
-            worksheet_ops.write(start_row, start_col + 2, 'value', cell_format['bold_center'])
-            # body
-            start_row += 1
-            worksheet_ops.write(start_row, start_col, 'start', cell_format['right'])
-            for operation in my_operations:
-                if operation.op_type == ops_type:
-                    # operation's date
-                    worksheet_ops.write(start_row, start_col, operation.op_date.strftime('%Y %b %d  %H:%M'),
-                                        cell_format['left'])
-                    # operation's ticker
-                    worksheet_ops.write(start_row, start_col + 1, operation.op_ticker,
-                                        cell_format['left'])
-
-                    # operation's value (payment in the operation's currency)
-                    if operation.op_currency in supported_currencies:
-                        worksheet_ops.write(start_row, start_col + 2, operation.op_payment,
-                                            cell_format[operation.op_currency])
-                    else:
-                        worksheet_ops.write(start_row, start_col + 2, 'unknown currency', cell_format['right'])
-                    start_row += 1
-
-            finish_row = start_row + 1
-            return finish_row
-
-        # PAY IN operations
-        logger.info('building Pay In operations list..')
-        finish_row_payin = print_operations_by_type('PayIn', s_row, s_col)
-        worksheet_ops.write(finish_row_payin, s_col + 1, sum_profile['payin'], cell_format['RUB'])
-
-        # PAY OUT operations
-        logger.info('building Pay Out operations list..')
-        finish_row_payout = print_operations_by_type('PayOut', s_row, s_col + 3)
-        worksheet_ops.write(finish_row_payout, s_col + 4, sum_profile['payout'], cell_format['RUB'])
-
-        # BUY operations
-        logger.info('building Buy operations list..')
-        last_row_buy = print_operations_with_ticker('Buy', s_row, s_col + 6)
-        worksheet_ops.write(last_row_buy, s_col + 8, sum_profile['buy'], cell_format['RUB'])
-        # BUY CARD operations
-        logger.info('building Buy Card operations list..')
-        last_row_buycard = print_operations_with_ticker('BuyCard', last_row_buy + 3, s_col + 6)
-        worksheet_ops.write(last_row_buycard, s_col + 8, sum_profile['buycard'], cell_format['RUB'])
-
-        # SELL operations
-        logger.info('building Sell operations list..')
-        last_row_sell = print_operations_with_ticker('Sell', s_row, s_col + 10)
-        worksheet_ops.write(last_row_sell, s_col + 12, sum_profile['sell'], cell_format['RUB'])
-
-        # Coupon operations
-        logger.info('building Coupon operations list..')
-        last_row_coupon = print_operations_with_ticker('Coupon', s_row, s_col + 14)
-        worksheet_ops.write(last_row_coupon, s_col + 16, sum_profile['coupon'], cell_format['RUB'])
-
-        # Dividend operations
-        logger.info('building Dividend operations list..')
-        last_row_dividend = print_operations_with_ticker('Dividend', s_row, s_col + 18)
-        worksheet_ops.write(last_row_dividend, s_col + 20, sum_profile['dividend'], cell_format['RUB'])
-
-        # Tax operations
-        logger.info('building Tax operations list..')
-        last_row_tax = print_operations_with_ticker('Tax', s_row, s_col + 22)
-        worksheet_ops.write(last_row_tax, s_col + 24, sum_profile['tax'], cell_format['RUB'])
-        # Tax Coupon operations
-        logger.info('building Tax Coupon operations list..')
-        last_row_tax_coupon = print_operations_with_ticker('TaxCoupon', last_row_tax + 3, s_col + 22)
-        worksheet_ops.write(last_row_tax_coupon, s_col + 24, sum_profile['taxcoupon'], cell_format['RUB'])
-        # Tax Dividend operations
-        logger.info('building Tax Dividend operations list..')
-        last_row_tax_dividend = print_operations_with_ticker('TaxDividend', last_row_tax_coupon + 3, s_col + 22)
-        worksheet_ops.write(last_row_tax_dividend, s_col + 24, sum_profile['taxdividend'], cell_format['RUB'])
-
-        # Commission
-        logger.info('building Broker Commission operations list..')
-        last_row_broker_commission = print_operations_by_type('BrokerCommission', s_row, s_col + 26)
-        worksheet_ops.write(last_row_broker_commission, s_col + 27, sum_profile['brokercommission'], cell_format['RUB'])
-        logger.info('building Service Commission operations list..')
-        last_row_broker_serv_commission = print_operations_by_type('ServiceCommission', last_row_broker_commission + 3, s_col + 26)
-        worksheet_ops.write(last_row_broker_serv_commission, s_col + 27, sum_profile['servicecommission'], cell_format['RUB'])
+            # TODO: формат даты...
+            worksheet_oplist.write(start_row, start_col,
+                                   operation.op_date,
+                                   cell_format['date_time'])
+            worksheet_oplist.write(start_row, start_col+1, operation.op_type)
+            if operation.op_ticker is not None and operation.op_ticker != "None":
+                worksheet_oplist.write(start_row, start_col+2, operation.op_ticker)
+            worksheet_oplist.write(start_row, start_col+3, operation.op_figi)
+            worksheet_oplist.write(start_row, start_col+4,
+                                   operation.op_payment.ammount,
+                                   cell_format[operation.op_currency])
+            worksheet_oplist.write(start_row, start_col+5,
+                                   operation.op_currency)
+            worksheet_oplist.write(start_row, start_col+6,
+                                   operation.op_payment_rub,
+                                   cell_format['RUB'])
+            worksheet_oplist.write(start_row, start_col+7, operation.op_status)
+            worksheet_oplist.write(start_row, start_col+8, operation.op_category)
 
     def print_statistics(s_row, s_col):
         # investing period
@@ -372,7 +330,7 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
         start_row = 6
         years = []
         for operation in my_operations:
-            if operation.op_type == 'Coupon' or operation.op_type == 'Dividend':
+            if operation.op_type in ['Выплата купонов', 'Выплата дивидендов']:
                 if operation.op_date.strftime('%Y') not in years:
                     years.append(operation.op_date.strftime('%Y'))
 
@@ -382,36 +340,44 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
             # header 1 - year
             worksheet_divs.merge_range(start_row, start_col, start_row, start_col + 4, year, merge_format['bold_center'])
             # header 2 - labels
-            worksheet_divs.set_column(start_col, start_col + 4, 14, cell_format['right'])
+            headers = [
+                # ["Название столбца", ширина],
+                ["Ticker", 14],
+                ["Date", 14],
+                ["Value", 14],
+                ["Tax", 14],
+                ["Value RUB", 14],
+            ]
             start_row += 1
-            worksheet_divs.write(start_row, start_col, 'Ticker', cell_format['bold_center'])
-            worksheet_divs.write(start_row, start_col + 1, 'Date', cell_format['bold_center'])
-            worksheet_divs.write(start_row, start_col + 2, 'Value', cell_format['bold_center'])
-            worksheet_divs.write(start_row, start_col + 3, 'Tax', cell_format['bold_center'])
-            worksheet_divs.write(start_row, start_col + 4, 'Value RUB', cell_format['bold_center'])
+            print_headers(worksheet_divs, start_col, start_row, headers, False)
             start_row += 1
 
             # content
             operations_per_year = []
             for operation in my_operations:
-                if operation.op_type == 'Coupon' or operation.op_type == 'Dividend':
+                if operation.op_type in ['Выплата купонов', 'Выплата дивидендов']:
                     if operation.op_date.strftime('%Y') == year:
                         # print ticker
-                        worksheet_divs.write(start_row, start_col, operation.op_ticker,cell_format['left'])
+                        worksheet_divs.write(start_row, start_col,
+                                             operation.op_ticker,
+                                             cell_format['left'])
                         # print date
-                        worksheet_divs.write(start_row, start_col + 1, operation.op_date.strftime('%Y %b %d'), cell_format['center'])
+                        worksheet_divs.write(start_row, start_col + 1,
+                                             operation.op_date.strftime('%Y %b %d'),
+                                             cell_format['center'])
                         # print value
                         if operation.op_currency in supported_currencies:
-                            worksheet_divs.write(start_row, start_col + 2, operation.op_payment, cell_format[operation.op_currency])
+                            worksheet_divs.write(start_row, start_col + 2, operation.op_payment.ammount, cell_format[operation.op_currency])
                         else:
                             worksheet_divs.write(start_row, start_col + 2, 'unknown currency', cell_format['right'])
                         # print tax
                         tax_payment = 0
                         for tax_op in my_operations:
-                            if (tax_op.op_type == 'TaxCoupon' or tax_op.op_type == 'TaxDividend'):
+                            if tax_op.op_type in ['Удержание налога по купонам',
+                                                  'Удержание налога по дивидендам']:
                                 if tax_op.op_ticker == operation.op_ticker and tax_op.op_date.strftime('%Y %b %d') == \
                                         operation.op_date.strftime('%Y %b %d'):
-                                    tax_payment = tax_op.op_payment
+                                    tax_payment = tax_op.op_payment.ammount
                                     worksheet_divs.write(start_row, start_col + 3, tax_payment,
                                                          cell_format[tax_op.op_currency])
                         if tax_payment == 0:
@@ -440,20 +406,21 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
     def print_iis_deduction_table():
         if sum_profile['broker_account_type'] != "TinkoffIis":
             logger.debug("account is not of IIS Type")
+            worksheet_deduct.hide()
             return
         logger.info("printing IIS deductions table")
 
-        start_col = 9
-        start_row = 7
+        start_col = 1
+        start_row = 3
         # Headers
-        worksheet_divs.merge_range(start_row-2, start_col,
+        worksheet_deduct.merge_range(start_row-2, start_col,
                                    start_row-2, start_col + 3,
                                    "Расчет налогового вычета ИИС", merge_format['bold_center'])
-        worksheet_divs.set_column(start_col + 1, start_col + 3, 13)
-        # worksheet_divs.write(start_row, start_col, 'Year', cell_format['bold_center'])
-        worksheet_divs.write(start_row, start_col + 1, 'PayIns', cell_format['bold_center'])
-        worksheet_divs.write(start_row, start_col + 2, 'Tax Base', cell_format['bold_center'])
-        worksheet_divs.write(start_row, start_col + 3, 'Deduction', cell_format['bold_center'])
+        worksheet_deduct.set_column(start_col + 1, start_col + 3, 13)
+        # worksheet_deduct.write(start_row, start_col, 'Year', cell_format['bold_center'])
+        worksheet_deduct.write(start_row, start_col + 1, 'PayIns', cell_format['bold_center'])
+        worksheet_deduct.write(start_row, start_col + 2, 'Tax Base', cell_format['bold_center'])
+        worksheet_deduct.write(start_row, start_col + 3, 'Deduction', cell_format['bold_center'])
 
         start_row += 1
 
@@ -466,20 +433,30 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
             base = year_sums[year]['base']
             deduct = year_sums[year]['deduct']
 
-            worksheet_divs.write(start_row, start_col, year, cell_format['bold_center'])
-            worksheet_divs.write(start_row, start_col + 1, payin, cell_format['RUB'])
-            worksheet_divs.write(start_row, start_col + 2, base, cell_format['RUB'])
-            worksheet_divs.write(start_row, start_col + 3, deduct, cell_format['RUB'])
+            worksheet_deduct.write(start_row, start_col, year, cell_format['bold_center'])
+            worksheet_deduct.write(start_row, start_col + 1, payin, cell_format['RUB'])
+            worksheet_deduct.write(start_row, start_col + 2, base, cell_format['RUB'])
+            worksheet_deduct.write(start_row, start_col + 3, deduct, cell_format['RUB'])
             start_row += 1
 
         # for the line on cell top
         deduct_total = year_sums[0]
-        worksheet_divs.write(start_row, start_col + 1, "", cell_format['RUB-bold-total'])
-        worksheet_divs.write(start_row, start_col + 2, "", cell_format['RUB-bold-total'])
-        worksheet_divs.write(start_row, start_col + 3, deduct_total, cell_format['RUB-bold-total'])
+        worksheet_deduct.write(start_row, start_col + 1, "", cell_format['RUB-bold-total'])
+        worksheet_deduct.write(start_row, start_col + 2, "", cell_format['RUB-bold-total'])
+        worksheet_deduct.write(start_row, start_col + 3, deduct_total, cell_format['RUB-bold-total'])
 
     def print_parts():
         logger.info('printing portfolio parts statistics...')
+
+        start_col = 1
+        start_row = 6
+
+        # Считаем сколько строк займет табличка частей
+        total = 0
+        for currency in supported_currencies:
+            if currency not in sum_profile['parts'].keys():
+                continue
+            total += len(sum_profile['parts'][currency].keys())+1
 
         # Comments in header
         worksheet_parts.merge_range(2, 1, 2, 6,
@@ -488,30 +465,31 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
         worksheet_parts.merge_range(4, 1, 4, 6,
                                     '* - расчет по курсу ЦБ на текущую дату',
                                     merge_format['left_small'])
-        worksheet_parts.merge_range(34, 1, 34, 3,
+        worksheet_parts.merge_range(start_row+total, start_col, start_row+total, start_col+3,
                                     'Данные для формирования диаграммы',
-                                    merge_format['bold_center'])
-        worksheet_parts.merge_range(35, 1, 35, 3,
+                                    merge_format['bold_left'])
+        worksheet_parts.merge_range(start_row+total+1, start_col, start_row+total+1, start_col+3,
                                     'Выделить и выбрать диаграмму "Солнечные лучи/',
                                     merge_format['left_small'])
-        worksheet_parts.merge_range(36, 1, 36, 3,
+        worksheet_parts.merge_range(start_row+total+2, start_col, start_row+total+2, start_col+3,
                                     'Sunburst" или "Дерево/Treemap"',
                                     merge_format['left_small'])
         # xlsxwriter не позволяет делать sunburst или treemap диаграммы :(
 
-        start_col = 1
-        start_row = 6
         # начальная строка для вывода данных для диаграмм по типу лучей солнца/Sunburst
         # или Дерева/Treemap - к сожалению только таблица данных, xlsxwriter их не вставляет
-        chart_data_row = start_row + 32
+        chart_data_row = start_row+total + 2
 
         # header - labels
+        headers = [
+            ["Value", 14],
+            ["Value RUB", 14],
+            ["Currency", 12],
+            ["Total %", 12],
+        ]
+        print_headers(worksheet_parts, start_col + 2, start_row, headers, False)
         worksheet_parts.set_column(start_col+2, start_col + 3, 14, cell_format['right'])
 
-        worksheet_parts.write(start_row, start_col + 2, 'Value', cell_format['bold_center'])
-        worksheet_parts.write(start_row, start_col + 3, 'Value RUB', cell_format['bold_center'])
-        worksheet_parts.write(start_row, start_col + 4, 'Currency %', cell_format['bold_center'])
-        worksheet_parts.write(start_row, start_col + 5, 'Total %', cell_format['bold_center'])
         start_row += 1
         cell_format['perc'] = workbook.add_format({'num_format': '0.0  ',
                                                    'font_color': get_color(5)})  # >0 for green
@@ -562,7 +540,7 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
         start_row += 1
         pie_data_start_row = start_row  # сохраняем строку с началом данных для графиков
         currency_count_for_chart = 0  # пересчитаем количество валют, чтобы потом выводить графики
-        
+
         for currency in supported_currencies:
             if currency not in sum_profile['parts'].keys():
                 continue
@@ -597,7 +575,7 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                                 pie_data_start_row + currency_count_for_chart-1, data_col],
             'data_labels': {'value': True, 'category': True, 'separator': "\n"},
         })
-        worksheet_parts.insert_chart('J14', chart)
+        worksheet_parts.insert_chart(start_row+2, start_col, chart)
 
         # Гистограмма с накоплением - труктура активов по типам и валютам
         chart2 = workbook.add_chart({'type': 'column', 'subtype': 'stacked'})
@@ -611,7 +589,7 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                 'data_labels': {'value': True},
                 'gap': 60,
             })
-        worksheet_parts.insert_chart('J29', chart2)
+        worksheet_parts.insert_chart(start_row+17, start_col, chart2)
 
     def print_clarification(s_row, s_col ):
         logger.info('printing clarification..')
@@ -659,8 +637,8 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                      'которая рассчитывает эффективность инвестирования '
                      'с учётом всех пополнений и выводов средств', 3],
 
-#            ['', ' Разработано @softandiron и контрибьюторами. Версия v2.x, 2021 год.', 0],
-#            ['', ' GitHub: https://github.com/softandiron/tinkproject', 0]
+            ['', ' Разработано @softandiron и контрибьюторами. Версия v3.x, 2022 год.', 0],
+            ['', ' GitHub: https://github.com/softandiron/tinkproject', 0]
         ]
 
         for line in lines:
@@ -671,7 +649,7 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
             n += 1 + line[2]
 
     last_row_pos = print_portfolio(1, 1)
-    print_operations(1, 2)
+    print_operations()
     print_statistics(last_row_pos + 3, 1)
     print_clarification(last_row_pos + 18, 1)
     print_dividends_and_coupons()
@@ -698,3 +676,22 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
                print(excel_file_name+" - File doesn't exists!")
     else:
         print("No creds.txt file exist, skipping FTP send.")
+
+#FTP send and delete + check for creds.txt   
+    if os.path.isfile('creds.txt'):
+        filename = excel_file_name
+        con = ftplib.FTP(host, ftp_user, ftp_password)
+        con.cwd(ftp_dir) #
+        f = open(filename, "rb")
+        send = con.storbinary("STOR "+ filename, f)
+        logger.info('Excel file sent to FTP: '+excel_file_name)
+        con.close
+        if os.path.isfile(excel_file_name):
+               os.remove(excel_file_name)
+               print("Success: Deleted "+excel_file_name)
+        else:
+               print(excel_file_name+" - File doesn't exists!")
+    else:
+        print("No creds.txt file exist, skipping FTP send.")
+        
+config = Config()
