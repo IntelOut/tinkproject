@@ -6,6 +6,7 @@ __pycache__/
 .DS_Store
 assets_db.db
 creds.txt
+config.yaml
 
 #default Python .gitignore file
 # Byte-compiled / optimized / DLL files
