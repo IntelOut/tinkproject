@@ -7,6 +7,8 @@ __pycache__/
 assets_db.db
 creds.txt
 config.yaml
+run.sh
+build.sh
 
 #default Python .gitignore file
 # Byte-compiled / optimized / DLL files
