@@ -1,4 +1,6 @@
 .git
+.idea/
+venv/
 LICENSE
 README.md
 *.xlsx
