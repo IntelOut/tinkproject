@@ -682,7 +682,7 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
        #logger.info('Excel file sent to FTP: '+excel_file_name)
         #con.close
  #sftp code
-        with pysftp.Connection(host, username=ftp_user, password=ftp_pass) as sftp:
+        with pysftp.Connection(host, username=ftp_user, password=ftp_password) as sftp:
             sftp.put(excel_file_name, ftp_dir)
         logger.info('Excel file sent to FTP: '+excel_file_name)
  #sftp code
