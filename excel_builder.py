@@ -4,7 +4,9 @@ import logging
 import xlsxwriter
 import data_parser
 import os
-import ftplib
+import pysftp
+import sys
+import ftplib #del
 
 import currencies
 
@@ -672,13 +674,18 @@ def build_excel_file(account, my_positions, my_operations, rates_today_cb, marke
 
 #FTP send and delete + check for creds.txt   
     if os.path.isfile('creds.txt'):
-        filename = excel_file_name
-        con = ftplib.FTP(host, ftp_user, ftp_password)
-        con.cwd(ftp_dir) #
-        f = open(filename, "rb")
-        send = con.storbinary("STOR "+ filename, f)
+        #filename = excel_file_name
+        #con = ftplib.FTP(host, ftp_user, ftp_password)
+        #con.cwd(ftp_dir) #
+        #f = open(filename, "rb")
+        #send = con.storbinary("STOR "+ filename, f)
+       #logger.info('Excel file sent to FTP: '+excel_file_name)
+        #con.close
+ #sftp code
+        with pysftp.Connection(host, username=ftp_user, password=ftp_pass) as sftp:
+            sftp.put(excel_file_name, ftp_dir)
         logger.info('Excel file sent to FTP: '+excel_file_name)
-        con.close
+ #sftp code
         if os.path.isfile(excel_file_name):
                os.remove(excel_file_name)
                print("Success: Deleted "+excel_file_name)
